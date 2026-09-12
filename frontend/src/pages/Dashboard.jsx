@@ -50,7 +50,7 @@ const Dashboard = () => {
         }
 
         const response = await axios.get(
-          "http://localhost:5000/api/invitations",
+         "https://k2love-backend.onrender.com/api/invitations" ,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -94,7 +94,7 @@ const Dashboard = () => {
         localStorage.getItem("token");
 
       const response = await axios.post(
-        "http://localhost:5000/api/invitations/accept",
+     "https://k2love-backend.onrender.com/api/invitations/accept",
         {
           token: invitation.token,
         },

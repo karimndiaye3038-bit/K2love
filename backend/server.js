@@ -39,8 +39,8 @@ const FRONTEND_URL =
 const allowedOrigins = [
   "http://localhost:5174",
   "http://localhost:5173",
+  "https://k2love.vercel.app",
 ];
-
 app.use(
   cors({
     origin: function (origin, callback) {

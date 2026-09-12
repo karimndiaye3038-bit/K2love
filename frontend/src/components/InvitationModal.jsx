@@ -2,7 +2,7 @@ import { useState } from "react";
 import { X, Heart, Send } from "lucide-react";
 import axios from "axios";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = "https://k2love-backend.onrender.com/api";
 
 const InvitationModal = ({ onClose }) => {
   const [email, setEmail] = useState("");

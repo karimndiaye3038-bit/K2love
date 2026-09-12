@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { Heart, Check, X } from "lucide-react";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL = "https://k2love-backend.onrender.com/api";
 
 const Invitations = () => {
   const [invitation, setInvitation] = useState(null);
