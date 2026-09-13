@@ -1,3 +1,4 @@
+
 const mongoose = require("mongoose");
 
 const coupleSchema = new mongoose.Schema(
@@ -23,7 +24,7 @@ const coupleSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-  }
+  },
 );
 
 module.exports = mongoose.model(

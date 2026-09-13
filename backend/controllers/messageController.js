@@ -7,12 +7,15 @@ const User = require("../models/User");
 
 const getMessages = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    const user = await User.findById(
+      req.user.id
+    );
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "Utilisateur introuvable.",
+        message:
+          "Utilisateur introuvable.",
       });
     }
 
@@ -24,16 +27,17 @@ const getMessages = async (req, res) => {
       });
     }
 
-    const messages = await Message.find({
-      couple: user.couple,
-    })
-      .populate(
-        "sender",
-        "name email avatar"
-      )
-      .sort({
-        createdAt: 1,
-      });
+    const messages =
+      await Message.find({
+        couple: user.couple,
+      })
+        .populate(
+          "sender",
+          "name email avatar"
+        )
+        .sort({
+          createdAt: 1,
+        });
 
     return res.status(200).json({
       success: true,
@@ -47,39 +51,37 @@ const getMessages = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Erreur serveur.",
-      error:
-        process.env.NODE_ENV === "development"
-          ? error.message
-          : undefined,
+      message:
+        "Erreur serveur.",
+      error: error.message,
     });
   }
 };
 
 // =====================================================
-// ENVOYER UN MESSAGE TEXTE
+// MESSAGE TEXTE
 // =====================================================
 
-const sendMessage = async (req, res) => {
+const sendMessage = async (
+  req,
+  res
+) => {
   try {
-    const { content } = req.body;
+    const { content } =
+      req.body;
 
-    // -----------------------------------------------
-    // UTILISATEUR
-    // -----------------------------------------------
-
-    const user = await User.findById(req.user.id);
+    const user =
+      await User.findById(
+        req.user.id
+      );
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "Utilisateur introuvable.",
+        message:
+          "Utilisateur introuvable.",
       });
     }
-
-    // -----------------------------------------------
-    // COUPLE
-    // -----------------------------------------------
 
     if (!user.couple) {
       return res.status(400).json({
@@ -89,36 +91,32 @@ const sendMessage = async (req, res) => {
       });
     }
 
-    // -----------------------------------------------
-    // CONTENU
-    // -----------------------------------------------
-
     if (
       !content ||
       !content.trim()
     ) {
       return res.status(400).json({
         success: false,
-        message: "Le message est vide.",
+        message:
+          "Le message est vide.",
       });
     }
 
-    // -----------------------------------------------
-    // CRÉER MESSAGE
-    // -----------------------------------------------
+    const message =
+      await Message.create({
+        couple: user.couple,
 
-    const message = await Message.create({
-      couple: user.couple,
-      sender: user._id,
-      content: content.trim(),
-      type: "text",
-      fileUrl: null,
-      audioUrl: null,
-    });
+        sender: user._id,
 
-    // -----------------------------------------------
-    // POPULATE
-    // -----------------------------------------------
+        content:
+          content.trim(),
+
+        type: "text",
+
+        fileUrl: null,
+
+        audioUrl: null,
+      });
 
     const populatedMessage =
       await Message.findById(
@@ -128,11 +126,8 @@ const sendMessage = async (req, res) => {
         "name email avatar"
       );
 
-    // -----------------------------------------------
-    // SOCKET.IO
-    // -----------------------------------------------
-
-    const io = req.app.get("io");
+    const io =
+      req.app.get("io");
 
     if (io) {
       io.to(
@@ -143,13 +138,10 @@ const sendMessage = async (req, res) => {
       );
     }
 
-    // -----------------------------------------------
-    // RÉPONSE
-    // -----------------------------------------------
-
     return res.status(201).json({
       success: true,
-      message: populatedMessage,
+      message:
+        populatedMessage,
     });
   } catch (error) {
     console.error(
@@ -159,184 +151,223 @@ const sendMessage = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Erreur serveur.",
-      error:
-        process.env.NODE_ENV === "development"
-          ? error.message
-          : undefined,
-    });
-  }
-};
-
-// =====================================================
-// ENVOYER PHOTO / VIDÉO / AUDIO
-// =====================================================
-
-const sendMediaMessage = async (
-  req,
-  res
-) => {
-  try {
-    console.log(
-      "📁 Fichier reçu :",
-      req.file
-    );
-
-    // -----------------------------------------------
-    // UTILISATEUR
-    // -----------------------------------------------
-
-    const user = await User.findById(
-      req.user.id
-    );
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "Utilisateur introuvable.",
-      });
-    }
-
-    // -----------------------------------------------
-    // COUPLE
-    // -----------------------------------------------
-
-    if (!user.couple) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Vous devez d'abord connecter votre partenaire.",
-      });
-    }
-
-    // -----------------------------------------------
-    // FICHIER
-    // -----------------------------------------------
-
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "Aucun fichier reçu.",
-      });
-    }
-
-    // -----------------------------------------------
-    // TYPE
-    // -----------------------------------------------
-
-    const mimeType =
-      req.file.mimetype;
-
-    let messageType;
-
-    if (
-      mimeType.startsWith("image/")
-    ) {
-      messageType = "image";
-    } else if (
-      mimeType.startsWith("video/")
-    ) {
-      messageType = "video";
-    } else if (
-      mimeType.startsWith("audio/")
-    ) {
-      messageType = "audio";
-    } else {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Type de fichier non supporté.",
-      });
-    }
-
-    // -----------------------------------------------
-    // URL
-    // -----------------------------------------------
-
-    const fileUrl =
-      `/uploads/media/${req.file.filename}`;
-
-    console.log(
-      "📎 URL fichier :",
-      fileUrl
-    );
-
-    console.log(
-      "🎞️ Type message :",
-      messageType
-    );
-
-    // -----------------------------------------------
-    // CRÉER MESSAGE
-    // -----------------------------------------------
-
-    const message =
-      await Message.create({
-        couple: user.couple,
-
-        sender: user._id,
-
-        content: "",
-
-        type: messageType,
-
-        fileUrl: fileUrl,
-
-        audioUrl:
-          messageType === "audio"
-            ? fileUrl
-            : null,
-      });
-
-    // -----------------------------------------------
-    // POPULATE
-    // -----------------------------------------------
-
-    const populatedMessage =
-      await Message.findById(
-        message._id
-      ).populate(
-        "sender",
-        "name email avatar"
-      );
-
-    // -----------------------------------------------
-    // SOCKET.IO
-    // -----------------------------------------------
-
-    const io = req.app.get("io");
-
-    if (io) {
-      io.to(
-        user.couple.toString()
-      ).emit(
-        "newMessage",
-        populatedMessage
-      );
-    }
-
-    // -----------------------------------------------
-    // RÉPONSE
-    // -----------------------------------------------
-
-    return res.status(201).json({
-      success: true,
-      message: populatedMessage,
-    });
-  } catch (error) {
-    console.error(
-      "❌ ERREUR ENVOI MÉDIA :",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
       message:
-        "Erreur serveur lors de l'envoi du fichier.",
+        "Erreur serveur.",
       error: error.message,
     });
   }
 };
+
+// =====================================================
+// PHOTO / VIDEO / AUDIO
+// =====================================================
+
+const sendMediaMessage =
+  async (req, res) => {
+    try {
+      console.log(
+        "================================"
+      );
+
+      console.log(
+        "📁 NOUVEL UPLOAD"
+      );
+
+      console.log(
+        "================================"
+      );
+
+      console.log(
+        "📁 req.file :",
+        req.file
+      );
+
+      console.log(
+        "📦 req.body :",
+        req.body
+      );
+
+      // =============================================
+      // UTILISATEUR
+      // =============================================
+
+      const user =
+        await User.findById(
+          req.user.id
+        );
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Utilisateur introuvable.",
+        });
+      }
+
+      // =============================================
+      // COUPLE
+      // =============================================
+
+      if (!user.couple) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Vous devez d'abord connecter votre partenaire.",
+        });
+      }
+
+      // =============================================
+      // FICHIER
+      // =============================================
+
+      if (!req.file) {
+        console.error(
+          "❌ Aucun fichier reçu"
+        );
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "Aucun fichier reçu.",
+        });
+      }
+
+      // =============================================
+      // MIME
+      // =============================================
+
+      const mimeType =
+        req.file.mimetype || "";
+
+      let messageType =
+        null;
+
+      if (
+        mimeType.startsWith(
+          "image/"
+        )
+      ) {
+        messageType =
+          "image";
+      } else if (
+        mimeType.startsWith(
+          "video/"
+        )
+      ) {
+        messageType =
+          "video";
+      } else if (
+        mimeType.startsWith(
+          "audio/"
+        )
+      ) {
+        messageType =
+          "audio";
+      }
+
+      if (!messageType) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Type de fichier non supporté.",
+        });
+      }
+
+      // =============================================
+      // URL
+      // =============================================
+
+      const fileUrl =
+        `/uploads/media/${req.file.filename}`;
+
+      console.log(
+        "📎 fileUrl :",
+        fileUrl
+      );
+
+      console.log(
+        "🎞️ type :",
+        messageType
+      );
+
+      // =============================================
+      // MESSAGE
+      // =============================================
+
+      const message =
+        await Message.create({
+          couple: user.couple,
+
+          sender: user._id,
+
+          content: "",
+
+          type: messageType,
+
+          fileUrl,
+
+          audioUrl:
+            messageType ===
+            "audio"
+              ? fileUrl
+              : null,
+        });
+
+      // =============================================
+      // POPULATE
+      // =============================================
+
+      const populatedMessage =
+        await Message.findById(
+          message._id
+        ).populate(
+          "sender",
+          "name email avatar"
+        );
+
+      // =============================================
+      // SOCKET
+      // =============================================
+
+      const io =
+        req.app.get("io");
+
+      if (io) {
+        io.to(
+          user.couple.toString()
+        ).emit(
+          "newMessage",
+          populatedMessage
+        );
+      }
+
+      // =============================================
+      // RÉPONSE
+      // =============================================
+
+      return res.status(201).json({
+        success: true,
+        message:
+          populatedMessage,
+      });
+    } catch (error) {
+      console.error(
+        "❌ ERREUR ENVOI MÉDIA"
+      );
+
+      console.error(
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Erreur serveur lors de l'envoi du fichier.",
+        error:
+          error.message,
+      });
+    }
+  };
 
 // =====================================================
 // EXPORT

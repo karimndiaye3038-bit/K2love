@@ -32,14 +32,12 @@ const userSchema = new mongoose.Schema(
       default: "user",
     },
 
-    // Partenaire du couple
     partner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
     },
 
-    // Couple auquel appartient l'utilisateur
     couple: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Couple",

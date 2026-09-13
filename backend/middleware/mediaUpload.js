@@ -2,25 +2,25 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// ========================================
-// DOSSIER UPLOADS
-// ========================================
+// =====================================================
+// DOSSIER UPLOAD
+// =====================================================
 
 const uploadDir = path.join(
   __dirname,
   "../uploads/media"
 );
 
-// Créer le dossier s'il n'existe pas
+// Créer automatiquement le dossier
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, {
     recursive: true,
   });
 }
 
-// ========================================
-// STOCKAGE
-// ========================================
+// =====================================================
+// STORAGE
+// =====================================================
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -32,63 +32,42 @@ const storage = multer.diskStorage({
       file.originalname
     );
 
-    const name =
-      path
-        .basename(
-          file.originalname,
-          extension
-        )
-        .replace(/[^a-zA-Z0-9]/g, "-")
-        .toLowerCase();
+    const filename =
+      `${Date.now()}-${Math.round(
+        Math.random() * 1e9
+      )}${extension}`;
 
-    const uniqueName = `${Date.now()}-${name}${extension}`;
-
-    cb(null, uniqueName);
+    cb(null, filename);
   },
 });
 
-// ========================================
+// =====================================================
 // FILTRE
-// ========================================
+// =====================================================
 
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = [
-    // Images
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-    "image/gif",
-    "image/webp",
+  const mimeType =
+    file.mimetype || "";
 
-    // Vidéos
-    "video/mp4",
-    "video/webm",
-    "video/quicktime",
-
-    // Audio
-    "audio/mpeg",
-    "audio/mp3",
-    "audio/wav",
-    "audio/ogg",
-    "audio/webm",
-    "audio/mp4",
-  ];
-
-  if (allowedTypes.includes(file.mimetype)) {
+  if (
+    mimeType.startsWith("image/") ||
+    mimeType.startsWith("video/") ||
+    mimeType.startsWith("audio/")
+  ) {
     cb(null, true);
-  } else {
-    cb(
-      new Error(
-        "Type de fichier non autorisé."
-      ),
-      false
-    );
+    return;
   }
+
+  cb(
+    new Error(
+      "Type de fichier non supporté."
+    )
+  );
 };
 
-// ========================================
+// =====================================================
 // MULTER
-// ========================================
+// =====================================================
 
 const uploadMedia = multer({
   storage,
@@ -96,7 +75,8 @@ const uploadMedia = multer({
   fileFilter,
 
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50 MB
+    fileSize:
+      50 * 1024 * 1024,
   },
 });
 

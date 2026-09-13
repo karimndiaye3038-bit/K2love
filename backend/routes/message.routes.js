@@ -1,20 +1,24 @@
 const express = require("express");
 
-const router = express.Router();
+const router =
+  express.Router();
 
 const {
   getMessages,
   sendMessage,
   sendMediaMessage,
-} = require("../controllers/messageController");
+} =
+  require("../controllers/messageController");
 
-const protect = require("../middleware/authMiddleware");
+const protect =
+  require("../middleware/authMiddleware");
 
-const uploadMedia = require("../middleware/mediaUpload");
+const uploadMedia =
+  require("../middleware/mediaUpload");
 
-// ========================================
-// RÉCUPÉRER LES MESSAGES
-// ========================================
+// =====================================================
+// MESSAGES
+// =====================================================
 
 router.get(
   "/",
@@ -22,9 +26,9 @@ router.get(
   getMessages
 );
 
-// ========================================
-// ENVOYER UN MESSAGE TEXTE
-// ========================================
+// =====================================================
+// TEXTE
+// =====================================================
 
 router.post(
   "/",
@@ -32,9 +36,9 @@ router.post(
   sendMessage
 );
 
-// ========================================
-// ENVOYER PHOTO / VIDÉO / AUDIO
-// ========================================
+// =====================================================
+// PHOTO / VIDEO / AUDIO
+// =====================================================
 
 router.post(
   "/media",

@@ -12,23 +12,28 @@ import {
   Video,
   Mic,
   Square,
+  Phone,
+  PhoneCall,
+  PhoneOff,
+  Video as VideoIcon,
 } from "lucide-react";
 
 import { io } from "socket.io-client";
 
 // =====================================================
-// CONFIGURATION
+// CONFIG
 // =====================================================
 
-const API_URL = "https://k2love-backend.onrender.com";
+const API_URL =
+  "https://k2love-backend.onrender.com";
 
 // =====================================================
-// COMPONENT
+// COMPOSANT
 // =====================================================
 
 const Messages = () => {
   // ===================================================
-  // STATES
+  // MESSAGES
   // ===================================================
 
   const [messages, setMessages] = useState([]);
@@ -40,16 +45,37 @@ const Messages = () => {
   const [sendingMedia, setSendingMedia] =
     useState(false);
 
+  // ===================================================
+  // AUDIO RECORDING
+  // ===================================================
+
   const [recording, setRecording] =
     useState(false);
 
   const [mediaRecorder, setMediaRecorder] =
     useState(null);
 
-  const [mediaType, setMediaType] =
-    useState("image");
+  // ===================================================
+  // USER
+  // ===================================================
 
   const [currentUserId, setCurrentUserId] =
+    useState(null);
+
+  const [partnerId, setPartnerId] =
+    useState(null);
+
+  // ===================================================
+  // APPEL
+  // ===================================================
+
+  const [callState, setCallState] =
+    useState("idle");
+
+  const [callType, setCallType] =
+    useState(null);
+
+  const [incomingCall, setIncomingCall] =
     useState(null);
 
   // ===================================================
@@ -62,8 +88,25 @@ const Messages = () => {
 
   const fileInputRef = useRef(null);
 
+  const mediaTypeRef = useRef("image");
+
+  const peerConnectionRef = useRef(null);
+
+  const localStreamRef = useRef(null);
+
+  const remoteStreamRef = useRef(null);
+
+  const remoteAudioRef = useRef(null);
+
+  const remoteVideoRef = useRef(null);
+
+  const localVideoRef = useRef(null);
+
+  // ICE reçus avant que la connexion soit prête
+  const pendingIceCandidatesRef = useRef([]);
+
   // ===================================================
-  // RÉCUPÉRER L'ID DE L'UTILISATEUR
+  // USER ID DEPUIS JWT
   // ===================================================
 
   const getCurrentUserId = () => {
@@ -81,13 +124,14 @@ const Messages = () => {
         return null;
       }
 
-      const payload = JSON.parse(
-        atob(
-          parts[1]
-            .replace(/-/g, "+")
-            .replace(/_/g, "/")
-        )
-      );
+      const payload =
+        JSON.parse(
+          atob(
+            parts[1]
+              .replace(/-/g, "+")
+              .replace(/_/g, "/")
+          )
+        );
 
       return (
         payload.id ||
@@ -98,7 +142,7 @@ const Messages = () => {
       );
     } catch (error) {
       console.error(
-        "Erreur récupération utilisateur :",
+        "❌ JWT :",
         error
       );
 
@@ -107,7 +151,7 @@ const Messages = () => {
   };
 
   // ===================================================
-  // SCROLL VERS LE BAS
+  // SCROLL
   // ===================================================
 
   const scrollToBottom = () => {
@@ -119,7 +163,7 @@ const Messages = () => {
   };
 
   // ===================================================
-  // AJOUTER UN MESSAGE SANS DOUBLON
+  // ADD MESSAGE
   // ===================================================
 
   const addMessage = (newMessage) => {
@@ -127,19 +171,19 @@ const Messages = () => {
       return;
     }
 
-    setMessages((currentMessages) => {
-      const exists = currentMessages.some(
+    setMessages((current) => {
+      const exists = current.some(
         (message) =>
           String(message._id) ===
           String(newMessage._id)
       );
 
       if (exists) {
-        return currentMessages;
+        return current;
       }
 
       return [
-        ...currentMessages,
+        ...current,
         newMessage,
       ];
     });
@@ -148,7 +192,7 @@ const Messages = () => {
   };
 
   // ===================================================
-  // RÉCUPÉRER LES MESSAGES
+  // GET MESSAGES
   // ===================================================
 
   const fetchMessages = async () => {
@@ -179,7 +223,7 @@ const Messages = () => {
       scrollToBottom();
     } catch (error) {
       console.error(
-        "Erreur récupération messages :",
+        "❌ Erreur messages :",
         error.response?.data ||
           error.message
       );
@@ -189,12 +233,93 @@ const Messages = () => {
   };
 
   // ===================================================
-  // SOCKET.IO
+  // CLEANUP APPEL
+  // ===================================================
+
+  const cleanupCall = () => {
+    console.log(
+      "🧹 Nettoyage appel"
+    );
+
+    // -------------------------------------------------
+    // Local stream
+    // -------------------------------------------------
+
+    if (localStreamRef.current) {
+      localStreamRef.current
+        .getTracks()
+        .forEach((track) => {
+          track.stop();
+        });
+
+      localStreamRef.current = null;
+    }
+
+    // -------------------------------------------------
+    // Peer connection
+    // -------------------------------------------------
+
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+
+      peerConnectionRef.current = null;
+    }
+
+    // -------------------------------------------------
+    // Remote
+    // -------------------------------------------------
+
+    remoteStreamRef.current = null;
+
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject =
+        null;
+    }
+
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject =
+        null;
+    }
+
+    // -------------------------------------------------
+    // Local video
+    // -------------------------------------------------
+
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject =
+        null;
+    }
+
+    // -------------------------------------------------
+    // ICE
+    // -------------------------------------------------
+
+    pendingIceCandidatesRef.current = [];
+
+    // -------------------------------------------------
+    // State
+    // -------------------------------------------------
+
+    setCallState("idle");
+
+    setCallType(null);
+
+    setIncomingCall(null);
+  };
+
+  // ===================================================
+  // SOCKET
   // ===================================================
 
   useEffect(() => {
     const userId =
       getCurrentUserId();
+
+    if (!userId) {
+      setLoading(false);
+
+      return;
+    }
 
     setCurrentUserId(userId);
 
@@ -208,46 +333,376 @@ const Messages = () => {
     }
 
     // -------------------------------------------------
-    // CONNEXION SOCKET
+    // SOCKET
     // -------------------------------------------------
 
-    socketRef.current = io(
-      API_URL,
-      {
-        auth: {
-          token,
-        },
+    const socket = io(API_URL, {
+      auth: {
+        token,
+      },
+
+      transports: [
+        "websocket",
+        "polling",
+      ],
+    });
+
+    socketRef.current = socket;
+
+    // -------------------------------------------------
+    // CONNECTION
+    // -------------------------------------------------
+
+    socket.on(
+      "connect",
+      () => {
+        console.log(
+          "🟢 Socket connecté :",
+          socket.id
+        );
+
+        socket.emit(
+          "registerUser",
+          userId
+        );
       }
     );
 
     // -------------------------------------------------
-    // NOUVEAU MESSAGE
+    // REGISTERED
     // -------------------------------------------------
 
-    socketRef.current.on(
+    socket.on(
+      "user-registered",
+      (data) => {
+        console.log(
+          "👤 Utilisateur enregistré :",
+          data
+        );
+
+        if (data?.partnerId) {
+          setPartnerId(
+            data.partnerId
+          );
+
+          console.log(
+            "❤️ Partenaire trouvé :",
+            data.partnerId
+          );
+        } else {
+          console.log(
+            "⚠️ Aucun partenaire trouvé"
+          );
+        }
+      }
+    );
+
+    // -------------------------------------------------
+    // NEW MESSAGE
+    // -------------------------------------------------
+
+    socket.on(
       "newMessage",
       (message) => {
         addMessage(message);
       }
     );
 
-    // -------------------------------------------------
-    // NETTOYAGE
-    // -------------------------------------------------
+    // =================================================
+    // APPEL ENTRANT
+    // =================================================
+
+    socket.on(
+      "incoming-call",
+      ({
+        from,
+        to,
+        type,
+        offer,
+      }) => {
+        console.log(
+          "📞 Appel entrant :",
+          {
+            from,
+            to,
+            type,
+          }
+        );
+
+        setIncomingCall({
+          from,
+          to,
+          type,
+          offer,
+        });
+
+        setCallType(
+          type || "audio"
+        );
+
+        setCallState(
+          "incoming"
+        );
+      }
+    );
+
+    // =================================================
+    // APPEL ACCEPTÉ
+    // =================================================
+
+    socket.on(
+      "call-answered",
+      async ({
+        from,
+        answer,
+      }) => {
+        try {
+          console.log(
+            "📞 Réponse reçue"
+          );
+
+          const peer =
+            peerConnectionRef.current;
+
+          if (!peer) {
+            console.error(
+              "❌ PeerConnection inexistante"
+            );
+
+            return;
+          }
+
+          await peer.setRemoteDescription(
+            new RTCSessionDescription(
+              answer
+            )
+          );
+
+          // Ajouter les ICE en attente
+          await flushPendingIceCandidates();
+
+          setCallState(
+            "connected"
+          );
+
+          console.log(
+            "🟢 Appel connecté"
+          );
+        } catch (error) {
+          console.error(
+            "❌ Erreur réponse appel :",
+            error
+          );
+
+          cleanupCall();
+        }
+      }
+    );
+
+    // =================================================
+    // ICE
+    // =================================================
+
+    socket.on(
+      "ice-candidate",
+      async ({
+        from,
+        candidate,
+      }) => {
+        try {
+          if (!candidate) {
+            return;
+          }
+
+          const peer =
+            peerConnectionRef.current;
+
+          if (!peer) {
+            pendingIceCandidatesRef.current.push(
+              candidate
+            );
+
+            return;
+          }
+
+          // Si remoteDescription pas encore prête,
+          // on garde le candidat
+          if (
+            !peer.remoteDescription
+          ) {
+            pendingIceCandidatesRef.current.push(
+              candidate
+            );
+
+            return;
+          }
+
+          await peer.addIceCandidate(
+            new RTCIceCandidate(
+              candidate
+            )
+          );
+        } catch (error) {
+          console.error(
+            "❌ Erreur ICE :",
+            error
+          );
+        }
+      }
+    );
+
+    // =================================================
+    // APPEL REFUSÉ
+    // =================================================
+
+    socket.on(
+      "call-rejected",
+      () => {
+        alert(
+          "Votre partenaire a refusé l'appel."
+        );
+
+        cleanupCall();
+      }
+    );
+
+    // =================================================
+    // APPEL TERMINÉ
+    // =================================================
+
+    socket.on(
+      "call-ended",
+      () => {
+        cleanupCall();
+      }
+    );
+
+    // =================================================
+    // PARTENAIRE HORS LIGNE
+    // =================================================
+
+    socket.on(
+      "user-offline",
+      () => {
+        alert(
+          "Votre partenaire n'est pas connecté."
+        );
+
+        cleanupCall();
+      }
+    );
+
+    // =================================================
+    // PARTENAIRE INTROUVABLE
+    // =================================================
+
+    socket.on(
+      "partner-not-found",
+      () => {
+        alert(
+          "Aucun partenaire n'est associé à votre compte."
+        );
+
+        cleanupCall();
+      }
+    );
+
+    // =================================================
+    // ERREUR APPEL
+    // =================================================
+
+    socket.on(
+      "call-error",
+      (data) => {
+        console.error(
+          "❌ Call error :",
+          data
+        );
+
+        alert(
+          data?.message ||
+            "Impossible de démarrer l'appel."
+        );
+
+        cleanupCall();
+      }
+    );
+
+    // =================================================
+    // DISCONNECT
+    // =================================================
+
+    socket.on(
+      "disconnect",
+      (reason) => {
+        console.log(
+          "🔴 Socket déconnecté :",
+          reason
+        );
+      }
+    );
+
+    // =================================================
+    // CLEANUP
+    // =================================================
 
     return () => {
-      socketRef.current?.disconnect();
+      socket.removeAllListeners();
+
+      socket.disconnect();
 
       socketRef.current = null;
+
+      cleanupCall();
     };
   }, []);
 
   // ===================================================
-  // ENVOYER MESSAGE TEXTE
+  // FLUSH ICE
   // ===================================================
 
-  const handleSend = async (e) => {
-    e.preventDefault();
+  const flushPendingIceCandidates =
+    async () => {
+      const peer =
+        peerConnectionRef.current;
+
+      if (!peer) {
+        return;
+      }
+
+      if (!peer.remoteDescription) {
+        return;
+      }
+
+      const candidates =
+        pendingIceCandidatesRef.current;
+
+      pendingIceCandidatesRef.current = [];
+
+      for (
+        const candidate of candidates
+      ) {
+        try {
+          await peer.addIceCandidate(
+            new RTCIceCandidate(
+              candidate
+            )
+          );
+        } catch (error) {
+          console.error(
+            "❌ ICE pending :",
+            error
+          );
+        }
+      }
+    };
+
+  // ===================================================
+  // TEXTE
+  // ===================================================
+
+  const handleSend = async (event) => {
+    event.preventDefault();
 
     if (!content.trim()) {
       return;
@@ -259,7 +714,7 @@ const Messages = () => {
 
       if (!token) {
         alert(
-          "Votre session a expiré. Veuillez vous reconnecter."
+          "Votre session a expiré."
         );
 
         return;
@@ -271,8 +726,6 @@ const Messages = () => {
           {
             content:
               content.trim(),
-
-            type: "text",
           },
           {
             headers: {
@@ -282,320 +735,260 @@ const Messages = () => {
           }
         );
 
-      // Ajouter seulement si Socket.IO
-      // ne l'a pas déjà ajouté
       addMessage(
         response.data.message
       );
 
       setContent("");
-
-      scrollToBottom();
     } catch (error) {
       console.error(
-        "Erreur envoi message :",
-        error.response?.data ||
-          error.message
+        "❌ Message :",
+        error
       );
 
       alert(
-        error.response?.data?.message ||
+        error.response?.data
+          ?.message ||
           "Impossible d'envoyer le message."
       );
     }
   };
 
   // ===================================================
-  // CHOISIR PHOTO / VIDEO
+  // CHOISIR MÉDIA
   // ===================================================
 
-  const handleChooseMedia = (
-    type
-  ) => {
-    setMediaType(type);
+  const handleChooseMedia =
+    (type) => {
+      mediaTypeRef.current =
+        type;
 
-    setTimeout(() => {
-      fileInputRef.current?.click();
-    }, 0);
-  };
+      setTimeout(() => {
+        fileInputRef.current?.click();
+      }, 0);
+    };
 
   // ===================================================
-  // ENVOYER PHOTO / VIDEO
+  // MÉDIA
   // ===================================================
 
-  const handleMediaChange = async (
-    event
-  ) => {
-    const file =
-      event.target.files?.[0];
+  const handleMediaChange =
+    async (event) => {
+      const file =
+        event.target.files?.[0];
 
-    if (!file) {
-      return;
-    }
+      if (!file) {
+        return;
+      }
 
-    // -------------------------------------------------
-    // VÉRIFIER IMAGE
-    // -------------------------------------------------
+      const selectedType =
+        mediaTypeRef.current;
 
-    if (
-      mediaType === "image" &&
-      !file.type.startsWith("image/")
-    ) {
-      alert(
-        "Veuillez sélectionner une image."
-      );
+      // ------------------------------------------------
+      // IMAGE
+      // ------------------------------------------------
 
-      event.target.value = "";
-
-      return;
-    }
-
-    // -------------------------------------------------
-    // VÉRIFIER VIDEO
-    // -------------------------------------------------
-
-    if (
-      mediaType === "video" &&
-      !file.type.startsWith("video/")
-    ) {
-      alert(
-        "Veuillez sélectionner une vidéo."
-      );
-
-      event.target.value = "";
-
-      return;
-    }
-
-    // -------------------------------------------------
-    // LIMITE 100 MB
-    // -------------------------------------------------
-
-    if (
-      file.size >
-      100 * 1024 * 1024
-    ) {
-      alert(
-        "Le fichier ne doit pas dépasser 100 MB."
-      );
-
-      event.target.value = "";
-
-      return;
-    }
-
-    try {
-      setSendingMedia(true);
-
-      const token =
-        localStorage.getItem("token");
-
-      if (!token) {
+      if (
+        selectedType ===
+          "image" &&
+        !file.type.startsWith(
+          "image/"
+        )
+      ) {
         alert(
-          "Votre session a expiré."
+          "Veuillez sélectionner une image."
         );
+
+        event.target.value = "";
 
         return;
       }
 
-      // -------------------------------------------------
-      // FORMDATA
-      // -------------------------------------------------
+      // ------------------------------------------------
+      // VIDEO
+      // ------------------------------------------------
 
-      const formData =
-        new FormData();
-
-      /*
-       IMPORTANT :
-
-       Le backend utilise :
-
-       uploadMedia.single("media")
-
-       Donc ici il faut utiliser "media"
-       et NON "file".
-      */
-
-      formData.append(
-        "media",
-        file
-      );
-
-      formData.append(
-        "type",
-        mediaType
-      );
-
-      // -------------------------------------------------
-      // ENVOI
-      // -------------------------------------------------
-
-      const response =
-        await axios.post(
-          `${API_URL}/api/messages/media`,
-          formData,
-          {
-            headers: {
-              Authorization:
-                `Bearer ${token}`,
-            },
-          }
-        );
-
-      // -------------------------------------------------
-      // AJOUTER MESSAGE
-      // -------------------------------------------------
-
-      addMessage(
-        response.data.message
-      );
-
-      scrollToBottom();
-    } catch (error) {
-      console.error(
-        "Erreur envoi média :",
-        error.response?.data ||
-          error.message
-      );
-
-      alert(
-        error.response?.data?.message ||
-          "Impossible d'envoyer le fichier."
-      );
-    } finally {
-      setSendingMedia(false);
-
-      event.target.value = "";
-    }
-  };
-
-  // ===================================================
-  // COMMENCER ENREGISTREMENT VOCAL
-  // ===================================================
-
-  const startRecording = async () => {
-    try {
       if (
-        !navigator.mediaDevices ||
-        !navigator.mediaDevices
-          .getUserMedia
+        selectedType ===
+          "video" &&
+        !file.type.startsWith(
+          "video/"
+        )
       ) {
         alert(
-          "Votre navigateur ne permet pas l'accès au microphone."
+          "Veuillez sélectionner une vidéo."
         );
+
+        event.target.value = "";
 
         return;
       }
 
-      const stream =
-        await navigator.mediaDevices.getUserMedia(
-          {
-            audio: true,
-          }
-        );
-
-      let mimeType =
-        "audio/webm";
+      // ------------------------------------------------
+      // SIZE
+      // ------------------------------------------------
 
       if (
-        MediaRecorder.isTypeSupported(
-          "audio/webm;codecs=opus"
-        )
+        file.size >
+        50 * 1024 * 1024
       ) {
-        mimeType =
-          "audio/webm;codecs=opus";
-      } else if (
-        MediaRecorder.isTypeSupported(
-          "audio/ogg;codecs=opus"
-        )
-      ) {
-        mimeType =
-          "audio/ogg;codecs=opus";
-      }
-
-      const recorder =
-        new MediaRecorder(
-          stream,
-          {
-            mimeType,
-          }
+        alert(
+          "Maximum 50 MB."
         );
 
-      const chunks = [];
+        event.target.value = "";
 
-      recorder.ondataavailable = (
-        event
-      ) => {
-        if (
-          event.data &&
-          event.data.size > 0
-        ) {
-          chunks.push(
-            event.data
-          );
+        return;
+      }
+
+      try {
+        setSendingMedia(true);
+
+        const token =
+          localStorage.getItem("token");
+
+        if (!token) {
+          return;
         }
-      };
 
-      recorder.onstop = async () => {
-        const audioBlob =
-          new Blob(
-            chunks,
+        const formData =
+          new FormData();
+
+        formData.append(
+          "file",
+          file
+        );
+
+        formData.append(
+          "type",
+          selectedType
+        );
+
+        const response =
+          await axios.post(
+            `${API_URL}/api/messages/media`,
+            formData,
             {
-              type:
-                recorder.mimeType ||
-                "audio/webm",
+              headers: {
+                Authorization:
+                  `Bearer ${token}`,
+              },
             }
           );
 
-        await sendAudio(
-          audioBlob
+        addMessage(
+          response.data.message
+        );
+      } catch (error) {
+        console.error(
+          "❌ Média :",
+          error.response?.data ||
+            error.message
         );
 
-        stream
-          .getTracks()
-          .forEach(
-            (track) =>
-              track.stop()
+        alert(
+          error.response?.data
+            ?.message ||
+            "Impossible d'envoyer le fichier."
+        );
+      } finally {
+        setSendingMedia(false);
+
+        event.target.value = "";
+      }
+    };
+
+  // ===================================================
+  // ENREGISTREMENT AUDIO
+  // ===================================================
+
+  const startRecording =
+    async () => {
+      try {
+        const stream =
+          await navigator.mediaDevices.getUserMedia(
+            {
+              audio: true,
+            }
           );
-      };
 
-      recorder.start();
+        let mimeType =
+          "audio/webm";
 
-      setMediaRecorder(
-        recorder
-      );
+        if (
+          MediaRecorder.isTypeSupported(
+            "audio/webm;codecs=opus"
+          )
+        ) {
+          mimeType =
+            "audio/webm;codecs=opus";
+        }
 
-      setRecording(true);
-    } catch (error) {
-      console.error(
-        "Erreur microphone :",
-        error
-      );
+        const recorder =
+          new MediaRecorder(
+            stream,
+            {
+              mimeType,
+            }
+          );
 
-      if (
-        error.name ===
-        "NotFoundError"
-      ) {
-        alert(
-          "Aucun microphone n'a été trouvé."
+        const chunks = [];
+
+        recorder.ondataavailable =
+          (event) => {
+            if (
+              event.data &&
+              event.data.size
+            ) {
+              chunks.push(
+                event.data
+              );
+            }
+          };
+
+        recorder.onstop =
+          async () => {
+            const blob =
+              new Blob(
+                chunks,
+                {
+                  type:
+                    recorder.mimeType ||
+                    "audio/webm",
+                }
+              );
+
+            await sendAudio(blob);
+
+            stream
+              .getTracks()
+              .forEach(
+                (track) =>
+                  track.stop()
+              );
+          };
+
+        recorder.start();
+
+        setMediaRecorder(
+          recorder
         );
-      } else if (
-        error.name ===
-        "NotAllowedError"
-      ) {
-        alert(
-          "L'accès au microphone a été refusé."
+
+        setRecording(true);
+      } catch (error) {
+        console.error(
+          "❌ Microphone :",
+          error
         );
-      } else {
+
         alert(
           "Impossible d'accéder au microphone."
         );
       }
-    }
-  };
+    };
 
   // ===================================================
-  // ARRÊTER ENREGISTREMENT
+  // STOP RECORDING
   // ===================================================
 
   const stopRecording = () => {
@@ -613,7 +1006,7 @@ const Messages = () => {
   };
 
   // ===================================================
-  // ENVOYER AUDIO
+  // SEND AUDIO
   // ===================================================
 
   const sendAudio = async (
@@ -624,10 +1017,6 @@ const Messages = () => {
         localStorage.getItem("token");
 
       if (!token) {
-        alert(
-          "Votre session a expiré."
-        );
-
         return;
       }
 
@@ -635,14 +1024,19 @@ const Messages = () => {
         new FormData();
 
       formData.append(
-        "audio",
+        "file",
         audioBlob,
         "message.webm"
       );
 
+      formData.append(
+        "type",
+        "audio"
+      );
+
       const response =
         await axios.post(
-          `${API_URL}/api/messages/audio`,
+          `${API_URL}/api/messages/media`,
           formData,
           {
             headers: {
@@ -655,29 +1049,26 @@ const Messages = () => {
       addMessage(
         response.data.message
       );
-
-      scrollToBottom();
     } catch (error) {
       console.error(
-        "Erreur audio :",
+        "❌ Audio :",
         error.response?.data ||
           error.message
       );
 
       alert(
-        error.response?.data?.message ||
+        error.response?.data
+          ?.message ||
           "Impossible d'envoyer le vocal."
       );
     }
   };
 
   // ===================================================
-  // URL DES FICHIERS
+  // URL FICHIER
   // ===================================================
 
-  const getFileUrl = (
-    fileUrl
-  ) => {
+  const getFileUrl = (fileUrl) => {
     if (!fileUrl) {
       return null;
     }
@@ -703,7 +1094,7 @@ const Messages = () => {
   };
 
   // ===================================================
-  // DÉTERMINER SI LE MESSAGE EST LE MIEN
+  // MON MESSAGE
   // ===================================================
 
   const isMyMessage = (
@@ -729,157 +1120,620 @@ const Messages = () => {
   };
 
   // ===================================================
-  // AFFICHER LE CONTENU
+  // CONTENU MESSAGE
   // ===================================================
 
-  const renderMessageContent = (
-    message
-  ) => {
-    // -------------------------------------------------
-    // MESSAGE TEXTE
-    // -------------------------------------------------
-
-    if (
-      message.type === "text"
-    ) {
-      return (
-        <p className="whitespace-pre-wrap text-sm break-words">
-          {message.content}
-        </p>
-      );
-    }
-
-    // -------------------------------------------------
-    // URL FICHIER
-    // -------------------------------------------------
-
-    const fileUrl =
-      getFileUrl(
-        message.fileUrl
-      );
-
-    // -------------------------------------------------
-    // IMAGE
-    // -------------------------------------------------
-
-    if (
-      message.type === "image"
-    ) {
-      if (!fileUrl) {
+  const renderMessageContent =
+    (message) => {
+      if (
+        message.type ===
+        "text"
+      ) {
         return (
-          <p className="text-sm italic opacity-70">
+          <p className="whitespace-pre-wrap break-words text-sm">
+            {message.content}
+          </p>
+        );
+      }
+
+      const fileUrl =
+        getFileUrl(
+          message.fileUrl
+        );
+
+      // ------------------------------------------------
+      // IMAGE
+      // ------------------------------------------------
+
+      if (
+        message.type ===
+        "image"
+      ) {
+        return fileUrl ? (
+          <img
+            src={fileUrl}
+            alt="Photo"
+            className="max-h-[400px] max-w-full rounded-2xl object-cover"
+          />
+        ) : (
+          <p>
             Image indisponible
           </p>
         );
       }
 
-      return (
-        <div className="overflow-hidden rounded-2xl">
-          <img
+      // ------------------------------------------------
+      // VIDEO
+      // ------------------------------------------------
+
+      if (
+        message.type ===
+        "video"
+      ) {
+        return fileUrl ? (
+          <video
             src={fileUrl}
-            alt="Photo envoyée"
-            className="block max-h-[400px] max-w-full rounded-2xl object-cover"
-            loading="lazy"
-            onError={(event) => {
-              event.currentTarget.style.display =
-                "none";
-            }}
+            controls
+            preload="metadata"
+            className="max-h-[400px] max-w-full rounded-2xl"
           />
-        </div>
-      );
-    }
-
-    // -------------------------------------------------
-    // VIDEO
-    // -------------------------------------------------
-
-    if (
-      message.type === "video"
-    ) {
-      if (!fileUrl) {
-        return (
-          <p className="text-sm italic opacity-70">
+        ) : (
+          <p>
             Vidéo indisponible
           </p>
         );
       }
 
-      return (
-        <video
-          src={fileUrl}
-          controls
-          preload="metadata"
-          className="max-h-[400px] max-w-full rounded-2xl"
-        >
-          Votre navigateur ne supporte pas
-          la lecture vidéo.
-        </video>
-      );
-    }
+      // ------------------------------------------------
+      // AUDIO
+      // ------------------------------------------------
 
-    // -------------------------------------------------
-    // AUDIO
-    // -------------------------------------------------
+      if (
+        message.type ===
+        "audio"
+      ) {
+        const audioUrl =
+          getFileUrl(
+            message.audioUrl ||
+              message.fileUrl
+          );
 
-    if (
-      message.type === "audio"
-    ) {
-      /*
-       Le backend audio peut utiliser audioUrl.
-       On utilise donc audioUrl en priorité,
-       puis fileUrl comme solution de secours.
-      */
-
-      const audioUrl =
-        getFileUrl(
-          message.audioUrl ||
-          message.fileUrl
-        );
-
-      if (!audioUrl) {
-        return (
-          <p className="text-sm italic opacity-70">
+        return audioUrl ? (
+          <audio
+            src={audioUrl}
+            controls
+            className="w-full"
+          />
+        ) : (
+          <p>
             Audio indisponible
           </p>
         );
       }
 
-      return (
-        <div className="min-w-[220px]">
-          <audio
-            src={audioUrl}
-            controls
-            className="w-full"
-          >
-            Votre navigateur ne supporte pas
-            la lecture audio.
-          </audio>
-        </div>
+      return null;
+    };
+
+  // ===================================================
+  // PEER CONNECTION
+  // ===================================================
+
+  const createPeerConnection =
+    (targetUserId) => {
+      console.log(
+        "🔗 Création PeerConnection vers :",
+        targetUserId
+      );
+
+      const peer =
+        new RTCPeerConnection(
+          {
+            iceServers: [
+              {
+                urls:
+                  "stun:stun.l.google.com:19302",
+              },
+
+              {
+                urls:
+                  "stun:stun1.l.google.com:19302",
+              },
+            ],
+          }
+        );
+
+      peerConnectionRef.current =
+        peer;
+
+      // ------------------------------------------------
+      // ICE
+      // ------------------------------------------------
+
+      peer.onicecandidate =
+        (event) => {
+          if (
+            event.candidate
+          ) {
+            socketRef.current?.emit(
+              "ice-candidate",
+              {
+                to: targetUserId,
+
+                candidate:
+                  event.candidate,
+              }
+            );
+          }
+        };
+
+      // ------------------------------------------------
+      // TRACK
+      // ------------------------------------------------
+
+      peer.ontrack =
+        (event) => {
+          console.log(
+            "🎥 Track distante reçue"
+          );
+
+          const stream =
+            event.streams?.[0];
+
+          if (!stream) {
+            return;
+          }
+
+          remoteStreamRef.current =
+            stream;
+
+          // Vidéo
+          if (
+            remoteVideoRef.current
+          ) {
+            remoteVideoRef.current.srcObject =
+              stream;
+          }
+
+          // Audio
+          if (
+            remoteAudioRef.current
+          ) {
+            remoteAudioRef.current.srcObject =
+              stream;
+          }
+        };
+
+      // ------------------------------------------------
+      // CONNECTION STATE
+      // ------------------------------------------------
+
+      peer.onconnectionstatechange =
+        () => {
+          console.log(
+            "📡 WebRTC state :",
+            peer.connectionState
+          );
+
+          if (
+            peer.connectionState ===
+              "connected"
+          ) {
+            setCallState(
+              "connected"
+            );
+          }
+
+          if (
+            peer.connectionState ===
+              "failed"
+          ) {
+            console.error(
+              "❌ Connexion WebRTC échouée"
+            );
+
+            cleanupCall();
+          }
+
+          if (
+            peer.connectionState ===
+              "disconnected"
+          ) {
+            console.log(
+              "⚠️ WebRTC déconnecté"
+            );
+          }
+        };
+
+      return peer;
+    };
+
+  // ===================================================
+  // DÉMARRER APPEL
+  // ===================================================
+
+  const startCall = async (
+    type
+  ) => {
+    try {
+      if (
+        callState !==
+        "idle"
+      ) {
+        return;
+      }
+
+      const socket =
+        socketRef.current;
+
+      if (!socket) {
+        alert(
+          "La connexion au serveur n'est pas prête."
+        );
+
+        return;
+      }
+
+      if (!currentUserId) {
+        alert(
+          "Utilisateur non connecté."
+        );
+
+        return;
+      }
+
+      // ------------------------------------------------
+      // Demander microphone/caméra
+      // ------------------------------------------------
+
+      const constraints = {
+        audio: true,
+
+        video:
+          type === "video",
+      };
+
+      console.log(
+        "🎙️ Demande média :",
+        constraints
+      );
+
+      const stream =
+        await navigator.mediaDevices.getUserMedia(
+          constraints
+        );
+
+      localStreamRef.current =
+        stream;
+
+      // ------------------------------------------------
+      // Afficher vidéo locale
+      // ------------------------------------------------
+
+      if (
+        localVideoRef.current
+      ) {
+        localVideoRef.current.srcObject =
+          stream;
+      }
+
+      // ------------------------------------------------
+      // Création Peer
+      // ------------------------------------------------
+
+      // Le serveur retrouvera automatiquement
+      // le partenaire si "to" est absent.
+      //
+      // On utilise partnerId si déjà connu,
+      // mais aucun ID n'est inventé.
+
+      const targetUserId =
+        partnerId || null;
+
+      if (!targetUserId) {
+        console.log(
+          "ℹ️ PartnerId pas encore reçu. Le serveur va le résoudre."
+        );
+      }
+
+      const peer =
+        createPeerConnection(
+          targetUserId
+        );
+
+      // ------------------------------------------------
+      // Ajouter les tracks
+      // ------------------------------------------------
+
+      stream
+        .getTracks()
+        .forEach(
+          (track) => {
+            peer.addTrack(
+              track,
+              stream
+            );
+          }
+        );
+
+      // ------------------------------------------------
+      // Créer OFFER
+      // ------------------------------------------------
+
+      const offer =
+        await peer.createOffer();
+
+      await peer.setLocalDescription(
+        offer
+      );
+
+      // ------------------------------------------------
+      // State
+      // ------------------------------------------------
+
+      setCallType(type);
+
+      setCallState(
+        "calling"
+      );
+
+      // ------------------------------------------------
+      // Envoyer au serveur
+      // ------------------------------------------------
+
+      socket.emit(
+        "call-user",
+        {
+          // null = le serveur trouve
+          // automatiquement le partenaire
+          to: targetUserId,
+
+          from:
+            currentUserId,
+
+          type,
+
+          offer,
+        }
+      );
+
+      console.log(
+        "📞 Appel envoyé"
+      );
+    } catch (error) {
+      console.error(
+        "❌ Démarrage appel :",
+        error
+      );
+
+      cleanupCall();
+
+      if (
+        error.name ===
+        "NotAllowedError"
+      ) {
+        alert(
+          "Vous devez autoriser le microphone" +
+            (type === "video"
+              ? " et la caméra."
+              : ".")
+        );
+
+        return;
+      }
+
+      alert(
+        "Impossible de démarrer l'appel."
       );
     }
+  };
 
-    // -------------------------------------------------
-    // AUTRE FICHIER
-    // -------------------------------------------------
+  // ===================================================
+  // ACCEPTER APPEL
+  // ===================================================
 
-    if (!fileUrl) {
-      return (
-        <p className="text-sm italic opacity-70">
-          Fichier indisponible
-        </p>
+  const acceptCall = async () => {
+    try {
+      if (!incomingCall) {
+        return;
+      }
+
+      const socket =
+        socketRef.current;
+
+      if (!socket) {
+        return;
+      }
+
+      const {
+        from,
+        type,
+        offer,
+      } =
+        incomingCall;
+
+      console.log(
+        "✅ Acceptation appel :",
+        {
+          from,
+          type,
+        }
+      );
+
+      // ------------------------------------------------
+      // Média
+      // ------------------------------------------------
+
+      const stream =
+        await navigator.mediaDevices.getUserMedia(
+          {
+            audio: true,
+
+            video:
+              type === "video",
+          }
+        );
+
+      localStreamRef.current =
+        stream;
+
+      // ------------------------------------------------
+      // Vidéo locale
+      // ------------------------------------------------
+
+      if (
+        localVideoRef.current
+      ) {
+        localVideoRef.current.srcObject =
+          stream;
+      }
+
+      // ------------------------------------------------
+      // Peer
+      // ------------------------------------------------
+
+      const peer =
+        createPeerConnection(
+          from
+        );
+
+      // ------------------------------------------------
+      // Ajouter tracks
+      // ------------------------------------------------
+
+      stream
+        .getTracks()
+        .forEach(
+          (track) => {
+            peer.addTrack(
+              track,
+              stream
+            );
+          }
+        );
+
+      // ------------------------------------------------
+      // Remote offer
+      // ------------------------------------------------
+
+      await peer.setRemoteDescription(
+        new RTCSessionDescription(
+          offer
+        )
+      );
+
+      // ------------------------------------------------
+      // ICE reçus avant offer
+      // ------------------------------------------------
+
+      await flushPendingIceCandidates();
+
+      // ------------------------------------------------
+      // ANSWER
+      // ------------------------------------------------
+
+      const answer =
+        await peer.createAnswer();
+
+      await peer.setLocalDescription(
+        answer
+      );
+
+      // ------------------------------------------------
+      // State
+      // ------------------------------------------------
+
+      setCallType(type);
+
+      setCallState(
+        "connected"
+      );
+
+      setIncomingCall(
+        null
+      );
+
+      // ------------------------------------------------
+      // Envoyer answer
+      // ------------------------------------------------
+
+      socket.emit(
+        "answer-call",
+        {
+          to: from,
+
+          answer,
+        }
+      );
+
+      console.log(
+        "📞 Réponse envoyée"
+      );
+    } catch (error) {
+      console.error(
+        "❌ Acceptation appel :",
+        error
+      );
+
+      cleanupCall();
+
+      alert(
+        "Impossible d'accepter l'appel. Vérifiez les permissions du microphone et de la caméra."
       );
     }
+  };
 
-    return (
-      <a
-        href={fileUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="underline text-sm"
-      >
-        Voir le fichier
-      </a>
+  // ===================================================
+  // REFUSER APPEL
+  // ===================================================
+
+  const rejectCall = () => {
+    if (!incomingCall) {
+      return;
+    }
+
+    const from =
+      incomingCall.from;
+
+    socketRef.current?.emit(
+      "reject-call",
+      {
+        to: from,
+      }
     );
+
+    cleanupCall();
+  };
+
+  // ===================================================
+  // TERMINER APPEL
+  // ===================================================
+
+  const endCall = () => {
+    // ------------------------------------------------
+    // Informer partenaire
+    // ------------------------------------------------
+
+    let targetUserId =
+      incomingCall?.from ||
+      partnerId;
+
+    // Si on connaît le partenaire
+    if (targetUserId) {
+      socketRef.current?.emit(
+        "end-call",
+        {
+          to: targetUserId,
+        }
+      );
+    } else {
+      // Le serveur peut aussi retrouver
+      // automatiquement le partenaire
+      socketRef.current?.emit(
+        "end-call"
+      );
+    }
+
+    cleanupCall();
   };
 
   // ===================================================
@@ -889,45 +1743,89 @@ const Messages = () => {
   return (
     <div className="flex h-[calc(100vh-100px)] flex-col overflow-hidden rounded-3xl bg-white shadow-sm">
 
-      {/* ========================================= */}
-      {/* HEADER */}
-      {/* ========================================= */}
+      {/* =================================================
+          HEADER
+          ================================================= */}
 
-      <div className="border-b border-gray-100 bg-white p-5">
-        <h1 className="text-xl font-bold text-gray-800">
-          Messages ❤️
-        </h1>
+      <div className="flex items-center justify-between border-b border-gray-100 bg-white p-5">
 
-        <p className="text-sm text-gray-500">
-          Votre conversation privée
-        </p>
+        <div>
+          <h1 className="text-xl font-bold text-gray-800">
+            Messages ❤️
+          </h1>
+
+          <p className="text-sm text-gray-500">
+            Votre conversation privée
+          </p>
+        </div>
+
+        {/* APPELS */}
+
+        <div className="flex gap-2">
+
+          {/* AUDIO */}
+
+          <button
+            type="button"
+            onClick={() =>
+              startCall("audio")
+            }
+            disabled={
+              callState !==
+              "idle"
+            }
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-green-600 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Appel vocal"
+          >
+            <Phone
+              size={18}
+            />
+          </button>
+
+          {/* VIDEO */}
+
+          <button
+            type="button"
+            onClick={() =>
+              startCall("video")
+            }
+            disabled={
+              callState !==
+              "idle"
+            }
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Appel vidéo"
+          >
+            <VideoIcon
+              size={18}
+            />
+          </button>
+
+        </div>
       </div>
 
-      {/* ========================================= */}
-      {/* LISTE DES MESSAGES */}
-      {/* ========================================= */}
+      {/* =================================================
+          MESSAGES
+          ================================================= */}
 
       <div className="flex-1 space-y-3 overflow-y-auto bg-gray-50 p-4 sm:p-6">
 
         {loading ? (
           <div className="flex h-full items-center justify-center">
-            <p className="text-center text-gray-400">
+            <p className="text-gray-400">
               Chargement...
             </p>
           </div>
-        ) : messages.length === 0 ? (
+        ) : messages.length ===
+          0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
               <div className="text-5xl">
                 ❤️
               </div>
 
-              <p className="mt-3 font-semibold text-gray-700">
+              <p className="mt-3 font-semibold">
                 Votre histoire commence ici
-              </p>
-
-              <p className="mt-1 text-sm text-gray-400">
-                Envoyez votre premier message.
               </p>
             </div>
           </div>
@@ -944,23 +1842,19 @@ const Messages = () => {
                   key={
                     message._id
                   }
-                  className={`flex w-full ${
+                  className={`flex ${
                     mine
                       ? "justify-end"
                       : "justify-start"
                   }`}
                 >
                   <div
-                    className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 shadow-sm ${
+                    className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-sm ${
                       mine
-                        ? "rounded-br-md bg-gradient-to-r from-pink-500 to-purple-600 text-white"
-                        : "rounded-bl-md bg-white text-gray-800"
+                        ? "bg-gradient-to-r from-pink-500 to-purple-600 text-white"
+                        : "bg-white text-gray-800"
                     }`}
                   >
-
-                    {/* ================================= */}
-                    {/* NOM EXPÉDITEUR */}
-                    {/* ================================= */}
 
                     {!mine &&
                       message.sender && (
@@ -973,25 +1867,11 @@ const Messages = () => {
                         </p>
                       )}
 
-                    {/* ================================= */}
-                    {/* CONTENU */}
-                    {/* ================================= */}
-
                     {renderMessageContent(
                       message
                     )}
 
-                    {/* ================================= */}
-                    {/* HEURE */}
-                    {/* ================================= */}
-
-                    <p
-                      className={`mt-2 text-right text-[10px] ${
-                        mine
-                          ? "text-white/70"
-                          : "text-gray-400"
-                      }`}
-                    >
+                    <p className="mt-2 text-right text-[10px] opacity-60">
                       {message.createdAt
                         ? new Date(
                             message.createdAt
@@ -1005,6 +1885,7 @@ const Messages = () => {
                           )
                         : ""}
                     </p>
+
                   </div>
                 </div>
               );
@@ -1017,23 +1898,23 @@ const Messages = () => {
             messagesEndRef
           }
         />
+
       </div>
 
-      {/* ========================================= */}
-      {/* FORMULAIRE */}
-      {/* ========================================= */}
+      {/* =================================================
+          FORMULAIRE MESSAGE
+          ================================================= */}
 
       <form
         onSubmit={
           handleSend
         }
-        className="border-t border-gray-100 bg-white p-3 sm:p-4"
+        className="border-t border-gray-100 bg-white p-3"
       >
+
         <div className="flex items-center gap-2">
 
-          {/* ================================= */}
-          {/* INPUT FICHIER */}
-          {/* ================================= */}
+          {/* FILE INPUT */}
 
           <input
             ref={
@@ -1041,7 +1922,7 @@ const Messages = () => {
             }
             type="file"
             accept={
-              mediaType ===
+              mediaTypeRef.current ===
               "video"
                 ? "video/*"
                 : "image/*"
@@ -1052,9 +1933,7 @@ const Messages = () => {
             className="hidden"
           />
 
-          {/* ================================= */}
-          {/* PHOTO */}
-          {/* ================================= */}
+          {/* IMAGE */}
 
           <button
             type="button"
@@ -1066,17 +1945,14 @@ const Messages = () => {
             disabled={
               sendingMedia
             }
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-pink-50 text-pink-600 transition hover:bg-pink-100 disabled:opacity-50"
-            title="Envoyer une photo"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-pink-50 text-pink-600"
           >
             <ImageIcon
               size={20}
             />
           </button>
 
-          {/* ================================= */}
           {/* VIDEO */}
-          {/* ================================= */}
 
           <button
             type="button"
@@ -1088,17 +1964,14 @@ const Messages = () => {
             disabled={
               sendingMedia
             }
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-purple-600 transition hover:bg-purple-100 disabled:opacity-50"
-            title="Envoyer une vidéo"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-purple-600"
           >
             <Video
               size={20}
             />
           </button>
 
-          {/* ================================= */}
-          {/* VOCAL */}
-          {/* ================================= */}
+          {/* AUDIO */}
 
           <button
             type="button"
@@ -1110,16 +1983,11 @@ const Messages = () => {
             disabled={
               sendingMedia
             }
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition ${
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
               recording
                 ? "bg-red-100 text-red-600"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                : "bg-gray-100 text-gray-600"
             }`}
-            title={
-              recording
-                ? "Arrêter l'enregistrement"
-                : "Message vocal"
-            }
           >
             {recording ? (
               <Square
@@ -1132,9 +2000,7 @@ const Messages = () => {
             )}
           </button>
 
-          {/* ================================= */}
-          {/* CHAMP TEXTE */}
-          {/* ================================= */}
+          {/* INPUT */}
 
           <input
             type="text"
@@ -1144,21 +2010,15 @@ const Messages = () => {
                 e.target.value
               )
             }
-            placeholder={
-              recording
-                ? "Enregistrement en cours..."
-                : "Écrivez un message..."
-            }
             disabled={
               recording ||
               sendingMedia
             }
-            className="min-w-0 flex-1 rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none transition focus:border-pink-500"
+            placeholder="Écrivez un message..."
+            className="min-w-0 flex-1 rounded-xl border border-gray-200 px-4 py-3 text-sm outline-none focus:border-pink-500"
           />
 
-          {/* ================================= */}
-          {/* BOUTON ENVOYER */}
-          {/* ================================= */}
+          {/* SEND */}
 
           <button
             type="submit"
@@ -1167,40 +2027,232 @@ const Messages = () => {
               recording ||
               sendingMedia
             }
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-5"
+            className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white disabled:opacity-50"
           >
             <Send
               size={19}
             />
-
-            <span className="ml-2 hidden sm:inline">
-              Envoyer
-            </span>
           </button>
-        </div>
 
-        {/* ========================================= */}
-        {/* UPLOAD */}
-        {/* ========================================= */}
+        </div>
 
         {sendingMedia && (
           <p className="mt-2 text-center text-xs text-gray-400">
-            📤 Envoi du fichier en cours...
+            📤 Envoi...
           </p>
         )}
-
-        {/* ========================================= */}
-        {/* ENREGISTREMENT */}
-        {/* ========================================= */}
 
         {recording && (
-          <p className="mt-2 text-center text-xs font-medium text-red-500">
-            🔴 Enregistrement en cours...
-            Cliquez sur le bouton microphone
-            pour arrêter.
+          <p className="mt-2 text-center text-xs text-red-500">
+            🔴 Enregistrement...
           </p>
         )}
+
       </form>
+
+      {/* =================================================
+          APPEL ENTRANT
+          ================================================= */}
+
+      {incomingCall && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
+
+            <div className="text-center">
+
+              <div className="mx-auto flex h-20 w-20 animate-pulse items-center justify-center rounded-full bg-pink-100 text-pink-600">
+
+                {incomingCall.type ===
+                "video" ? (
+                  <VideoIcon
+                    size={34}
+                  />
+                ) : (
+                  <PhoneCall
+                    size={34}
+                  />
+                )}
+
+              </div>
+
+              <h2 className="mt-5 text-xl font-bold text-gray-800">
+                Appel entrant ❤️
+              </h2>
+
+              <p className="mt-2 text-sm text-gray-500">
+                {incomingCall.type ===
+                "video"
+                  ? "Votre partenaire vous appelle en vidéo."
+                  : "Votre partenaire vous appelle."}
+              </p>
+
+              <div className="mt-7 flex justify-center gap-6">
+
+                {/* REFUSER */}
+
+                <button
+                  type="button"
+                  onClick={
+                    rejectCall
+                  }
+                  className="flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-red-600 shadow-sm transition hover:bg-red-200"
+                  title="Refuser"
+                >
+                  <PhoneOff
+                    size={22}
+                  />
+                </button>
+
+                {/* ACCEPTER */}
+
+                <button
+                  type="button"
+                  onClick={
+                    acceptCall
+                  }
+                  className="flex h-14 w-14 items-center justify-center rounded-full bg-green-100 text-green-600 shadow-sm transition hover:bg-green-200"
+                  title="Accepter"
+                >
+                  <PhoneCall
+                    size={22}
+                  />
+                </button>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+      )}
+
+      {/* =================================================
+          APPEL EN COURS
+          ================================================= */}
+
+      {callState !==
+        "idle" &&
+        !incomingCall && (
+          <div className="fixed inset-0 z-40 bg-black">
+
+            {/* =================================================
+                VIDEO DISTANTE
+                ================================================= */}
+
+            <video
+              ref={
+                remoteVideoRef
+              }
+              autoPlay
+              playsInline
+              className={`h-full w-full object-cover ${
+                callType ===
+                "audio"
+                  ? "hidden"
+                  : "block"
+              }`}
+            />
+
+            {/* =================================================
+                AUDIO DISTANT
+                ================================================= */}
+
+            <audio
+              ref={
+                remoteAudioRef
+              }
+              autoPlay
+            />
+
+            {/* =================================================
+                VIDEO LOCALE
+                ================================================= */}
+
+            {callType ===
+              "video" && (
+              <video
+                ref={
+                  localVideoRef
+                }
+                autoPlay
+                muted
+                playsInline
+                className="absolute right-4 top-4 h-40 w-28 rounded-2xl border-2 border-white/30 bg-gray-900 object-cover shadow-xl sm:h-48 sm:w-36"
+              />
+            )}
+
+            {/* =================================================
+                APPEL AUDIO
+                ================================================= */}
+
+            {callType ===
+              "audio" && (
+              <div className="flex h-full items-center justify-center">
+
+                <div className="text-center text-white">
+
+                  <div className="mx-auto flex h-28 w-28 animate-pulse items-center justify-center rounded-full bg-gradient-to-r from-pink-500 to-purple-600 shadow-2xl">
+
+                    <PhoneCall
+                      size={48}
+                    />
+
+                  </div>
+
+                  <h2 className="mt-6 text-2xl font-bold">
+                    Appel vocal ❤️
+                  </h2>
+
+                  <p className="mt-2 text-gray-300">
+                    {callState ===
+                    "connected"
+                      ? "Appel connecté"
+                      : "Connexion..."}
+                  </p>
+
+                </div>
+
+              </div>
+            )}
+
+            {/* =================================================
+                STATUS
+                ================================================= */}
+
+            <div className="absolute left-4 top-4 rounded-full bg-black/60 px-4 py-2 text-sm text-white backdrop-blur">
+
+              {callState ===
+              "connected"
+                ? "🟢 Appel connecté"
+                : "📞 Appel en cours..."}
+
+            </div>
+
+            {/* =================================================
+                RACCROCHER
+                ================================================= */}
+
+            <div className="absolute bottom-8 left-1/2 flex -translate-x-1/2">
+
+              <button
+                type="button"
+                onClick={
+                  endCall
+                }
+                className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 text-white shadow-2xl transition hover:bg-red-700"
+                title="Raccrocher"
+              >
+                <PhoneOff
+                  size={26}
+                />
+              </button>
+
+            </div>
+
+          </div>
+        )}
     </div>
   );
 };
